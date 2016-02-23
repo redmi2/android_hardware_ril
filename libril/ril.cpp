@@ -2035,7 +2035,7 @@ static void dispatchRadioCapability(Parcel &p, RequestInfo *pRI){
 
     startRequest;
     appendPrintBuf("%s [version:%d, session:%d, phase:%d, rat:%d, \
-            logicalModemUuid:%s, status:%d", printBuf, rc.version, rc.session
+            logicalModemUuid:%s, status:%d", printBuf, rc.version, rc.session,
             rc.phase, rc.rat, rc.logicalModemUuid, rc.session);
 
     closeRequest;
@@ -2514,6 +2514,7 @@ static int responseDataCallListV6(Parcel &p, void *response, size_t responselen)
     return 0;
 }
 
+#if (RIL_VERSION == 11)
 static int responseDataCallListV9(Parcel &p, void *response, size_t responselen)
 {
     if (response == NULL && responselen != 0) {
@@ -2564,23 +2565,46 @@ static int responseDataCallListV9(Parcel &p, void *response, size_t responselen)
 
     return 0;
 }
-
+#endif
 
 static int responseDataCallList(Parcel &p, void *response, size_t responselen)
 {
     if (s_callbacks.version < 5) {
         RLOGD("responseDataCallList: v4");
         return responseDataCallListV4(p, response, responselen);
+#if (RIL_VERSION == 11)
     } else if (s_callbacks.version < 10) {
         return responseDataCallListV6(p, response, responselen);
     } else if (s_callbacks.version == 10) {
         return responseDataCallListV9(p, response, responselen);
+#endif
     } else {
         if (response == NULL && responselen != 0) {
             RLOGE("invalid response: NULL");
             return RIL_ERRNO_INVALID_RESPONSE;
         }
 
+#if (RIL_VERSION == 10)
+        // Support v6 or v9 with new rils
+        if (responselen % sizeof(RIL_Data_Call_Response_v6) == 0) {
+            RLOGD("responseDataCallList: v6");
+            return responseDataCallListV6(p, response, responselen);
+        }
+
+        if (responselen % sizeof(RIL_Data_Call_Response_v9) != 0) {
+            RLOGE("responseDataCallList: invalid response length %d expected multiple of %d",
+                    (int)responselen, (int)sizeof(RIL_Data_Call_Response_v9));
+            return RIL_ERRNO_INVALID_RESPONSE;
+        }
+
+        // Write version
+        p.writeInt32(10);
+
+        int num = responselen / sizeof(RIL_Data_Call_Response_v9);
+        p.writeInt32(num);
+
+        RIL_Data_Call_Response_v9 *p_cur = (RIL_Data_Call_Response_v9 *) response;
+#else
         if (responselen % sizeof(RIL_Data_Call_Response_v11) != 0) {
             RLOGE("invalid response length %d expected multiple of %d",
                     (int)responselen, (int)sizeof(RIL_Data_Call_Response_v11));
@@ -2594,6 +2618,7 @@ static int responseDataCallList(Parcel &p, void *response, size_t responselen)
         p.writeInt32(num);
 
         RIL_Data_Call_Response_v11 *p_cur = (RIL_Data_Call_Response_v11 *) response;
+#endif
         startResponse;
         int i;
         for (i = 0; i < num; i++) {
@@ -2607,6 +2632,19 @@ static int responseDataCallList(Parcel &p, void *response, size_t responselen)
             writeStringToParcel(p, p_cur[i].dnses);
             writeStringToParcel(p, p_cur[i].gateways);
             writeStringToParcel(p, p_cur[i].pcscf);
+#if (RIL_VERSION == 10)
+            appendPrintBuf("%s[status=%d,retry=%d,cid=%d,%s,%s,%s,%s,%s,%s,%s],", printBuf,
+                p_cur[i].status,
+                p_cur[i].suggestedRetryTime,
+                p_cur[i].cid,
+                (p_cur[i].active==0)?"down":"up",
+                (char*)p_cur[i].type,
+                (char*)p_cur[i].ifname,
+                (char*)p_cur[i].addresses,
+                (char*)p_cur[i].dnses,
+                (char*)p_cur[i].gateways,
+                (char*)p_cur[i].pcscf);
+#else
             p.writeInt32(p_cur[i].mtu);
             appendPrintBuf("%s[status=%d,retry=%d,cid=%d,%s,%s,%s,%s,%s,%s,%s,mtu=%d],", printBuf,
                 p_cur[i].status,
@@ -2620,6 +2658,7 @@ static int responseDataCallList(Parcel &p, void *response, size_t responselen)
                 (char*)p_cur[i].gateways,
                 (char*)p_cur[i].pcscf,
                 p_cur[i].mtu);
+#endif
         }
         removeLastChar;
         closeResponse;
@@ -3738,7 +3777,7 @@ static int responseLceData(Parcel &p, void *response, size_t responselen) {
   p.write((void *)&(p_cur->lce_suspended), 1);
 
   startResponse;
-  appendPrintBuf("LCE info received: capacity %d confidence level %d
+  appendPrintBuf("LCE info received: capacity %d confidence level %d \
                   and suspended %d",
                   p_cur->last_hop_capacity_kbps, p_cur->confidence_level,
                   p_cur->lce_suspended);
@@ -3768,7 +3807,7 @@ static int responseActivityData(Parcel &p, void *response, size_t responselen) {
   p.writeInt32(p_cur->rx_mode_time_ms);
 
   startResponse;
-  appendPrintBuf("Modem activity info received: sleep_mode_time_ms %d idle_mode_time_ms %d
+  appendPrintBuf("Modem activity info received: sleep_mode_time_ms %d idle_mode_time_ms %d \
                   tx_mode_time_ms %d %d %d %d %d and rx_mode_time_ms %d",
                   p_cur->sleep_mode_time_ms, p_cur->idle_mode_time_ms, p_cur->tx_mode_time_ms[0],
                   p_cur->tx_mode_time_ms[1], p_cur->tx_mode_time_ms[2], p_cur->tx_mode_time_ms[3],
